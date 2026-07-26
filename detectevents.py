@@ -323,10 +323,17 @@ def _is_deathmatch_mode_enabled(config, game_mode=None):
 
 
 def _is_event_allowed_in_deathmatch_mode(event, config, game_mode=None):
+    canonical_event = _get_canonical_event(event)
+
+    # Esta opcao vale para todos os modos de jogo, nao apenas para Deathmatch.
+    # Antes, ela so era consultada dentro do bloco abaixo e, por isso, desmarcar
+    # o checkbox na interface nao impedia a musica em partidas normais.
+    if canonical_event in COMBAT_EVENTS and not config.get("combat_music_enabled", True):
+        return False
+
     if not _is_deathmatch_mode_enabled(config, game_mode):
         return True
 
-    canonical_event = _get_canonical_event(event)
     allowed_events = {"menu", "kill", "death", "win_round", "loose_round"}
     if config.get("combat_music_enabled", True):
         allowed_events.update({"combat_intense", "survival"})
@@ -720,6 +727,12 @@ def _evaluate_combat_music(player, hp, kills, kills_anteriores_val, now, config,
 
 
 def _process_combat_music(data, now, config, phase, is_spectating_other, hp, kills, game_mode=None):
+    # Interrompe imediatamente uma faixa ja em execucao ao desativar a opcao.
+    if not config.get("combat_music_enabled", True):
+        if combat_estado_atual:
+            _stop_combat_music("musica de combate e sobrevivencia desativada")
+        return
+
     if _is_deathmatch_mode_enabled(config, game_mode) and not _is_event_allowed_in_deathmatch_mode("combat_intense", config, game_mode):
         if combat_estado_atual:
             _stop_combat_music("modo deathmatch ativo")

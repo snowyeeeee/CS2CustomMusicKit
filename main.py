@@ -4,11 +4,20 @@ import socket
 import subprocess
 import sys
 import time
-import tkinter as tk
 import ctypes
 import atexit
 import urllib.error
 import urllib.request
+
+# Alguns ambientes Python no Windows nao registram os diretorios Tcl/Tk. A
+# versao empacotada inclui uma copia em .tcl-runtime para a interface abrir de
+# forma independente da instalacao de Python usada no build.
+if getattr(sys, "frozen", False):
+    _tcl_runtime = os.path.join(sys._MEIPASS, ".tcl-runtime")
+    os.environ.setdefault("TCL_LIBRARY", os.path.join(_tcl_runtime, "tcl8.6"))
+    os.environ.setdefault("TK_LIBRARY", os.path.join(_tcl_runtime, "tk8.6"))
+
+import tkinter as tk
 from tkinter import filedialog, messagebox
 from findmusic import clamp_action_duration, clamp_volume, invalidate_config_cache, invalidate_music_path_cache
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "1"
@@ -908,7 +917,12 @@ class App:
                     self.get_action_loop_var(file).set(self.action_loop_var.get())
 
         self.files[event] = current_files
+        # As categorias comecam recolhidas. Ao configurar uma delas, mostre as
+        # faixas adicionadas de imediato; caso contrario o botao parece nao ter
+        # feito nada, especialmente em Combat intense e Survival.
+        self.event_expanded[event] = True
         self.refresh_event_ui(event)
+        self.schedule_config_save()
 
     def play_selected_music(self, event, caminho):
         if not caminho or not os.path.isfile(caminho):
