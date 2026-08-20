@@ -42,8 +42,6 @@ def default_config():
             "stress_kill": 50,
             "stress_decay_no_shoot": 10,
             "stress_decay_no_damage": 10,
-            "hp_survival_low": 78,
-            "hp_survival_critical": 77,
         },
     }
 

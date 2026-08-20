@@ -273,8 +273,6 @@ class App:
         self.stress_kill_var = tk.IntVar(value=50)
         self.stress_decay_no_shoot_var = tk.IntVar(value=10)
         self.stress_decay_no_damage_var = tk.IntVar(value=10)
-        self.hp_survival_low_var = tk.IntVar(value=78)
-        self.hp_survival_critical_var = tk.IntVar(value=77)
 
         self.bind_config_vars()
         self.build_layout()
@@ -297,8 +295,6 @@ class App:
             self.stress_kill_var,
             self.stress_decay_no_shoot_var,
             self.stress_decay_no_damage_var,
-            self.hp_survival_low_var,
-            self.hp_survival_critical_var,
         ):
             var.trace_add("write", self.on_config_var_changed)
 
@@ -399,7 +395,7 @@ class App:
 
         stress_row1 = tk.Frame(stress_frame)
         stress_row1.pack(fill="x", pady=4)
-        tk.Label(stress_row1, text="Max Stress:", width=20, anchor="w").pack(side="left")
+        tk.Label(stress_row1, text="Stress Limit:", width=20, anchor="w").pack(side="left")
         tk.Spinbox(stress_row1, from_=1, to=1000, textvariable=self.stress_max_var, width=8).pack(side="left", padx=4)
         
         tk.Label(stress_row1, text="Threshold:", width=15, anchor="w").pack(side="left", padx=(16, 0))
@@ -425,14 +421,6 @@ class App:
         stress_row4.pack(fill="x", pady=4)
         tk.Label(stress_row4, text="Decay Damage:", width=20, anchor="w").pack(side="left")
         tk.Spinbox(stress_row4, from_=0.1, to=100, textvariable=self.stress_decay_no_damage_var, width=8).pack(side="left", padx=4)
-
-        stress_row5 = tk.Frame(stress_frame)
-        stress_row5.pack(fill="x", pady=4)
-        tk.Label(stress_row5, text="HP Low:", width=20, anchor="w").pack(side="left")
-        tk.Spinbox(stress_row5, from_=1, to=200, textvariable=self.hp_survival_low_var, width=8).pack(side="left", padx=4)
-        
-        tk.Label(stress_row5, text="HP Critical:", width=15, anchor="w").pack(side="left", padx=(16, 0))
-        tk.Spinbox(stress_row5, from_=1, to=200, textvariable=self.hp_survival_critical_var, width=8).pack(side="left", padx=4)
 
         main_frame = tk.Frame(outer)
         main_frame.pack(fill="both", expand=True, pady=(10, 0))
@@ -852,8 +840,6 @@ class App:
         self.stress_kill_var.set(stress_settings.get("stress_kill", 50))
         self.stress_decay_no_shoot_var.set(stress_settings.get("stress_decay_no_shoot", 10))
         self.stress_decay_no_damage_var.set(stress_settings.get("stress_decay_no_damage", 10))
-        self.hp_survival_low_var.set(stress_settings.get("hp_survival_low", 78))
-        self.hp_survival_critical_var.set(stress_settings.get("hp_survival_critical", 77))
 
         invalidate_music_path_cache()
 
@@ -1003,8 +989,6 @@ class App:
                 "stress_kill": self.stress_kill_var.get(),
                 "stress_decay_no_shoot": self.stress_decay_no_shoot_var.get(),
                 "stress_decay_no_damage": self.stress_decay_no_damage_var.get(),
-                "hp_survival_low": self.hp_survival_low_var.get(),
-                "hp_survival_critical": self.hp_survival_critical_var.get(),
             },
         }
 

@@ -182,7 +182,14 @@ def _audio_worker():
                     current_music_session_id += 1
                     session_id = current_music_session_id
 
-                pygame.mixer.music.stop()
+                # O mixer possui apenas um canal de musica. Para que a troca
+                # tenha fade de verdade, primeiro reduza a faixa atual e so
+                # entao inicie a proxima (que entra em fade-in).
+                if fade_ms > 0 and pygame.mixer.music.get_busy():
+                    pygame.mixer.music.fadeout(fade_ms)
+                    time.sleep(fade_ms / 1000.0)
+                else:
+                    pygame.mixer.music.stop()
                 pygame.mixer.music.load(path)
                 pygame.mixer.music.set_volume(normalize_volume(volume))
                 pygame.mixer.music.play(-1 if loop else 0, fade_ms=fade_ms)
@@ -246,7 +253,11 @@ def _audio_worker():
                     current_music_loop = False
                     current_music_pos = 0.0
                     pending_music_request = None
-                pygame.mixer.music.fadeout(600)
+                fade_ms = payload.get("fade_ms", 600)
+                if fade_ms > 0:
+                    pygame.mixer.music.fadeout(fade_ms)
+                else:
+                    pygame.mixer.music.stop()
 
             elif command == "stop_effects":
                 for channel in effect_channels:
@@ -324,8 +335,13 @@ def play_event_sound(event_type, config):
         except Exception:
             pass
 
-def parar_musica():
-    _queue_audio_command("stop_music", {}, priority=True)
+def parar_musica(immediate=False):
+    """Para a musica principal; use imediato para eventos que exigem silencio."""
+    _queue_audio_command(
+        "stop_music",
+        {"fade_ms": 0 if immediate else 600},
+        priority=True,
+    )
 
 
 def parar_efeitos():

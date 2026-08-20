@@ -70,8 +70,6 @@ STRESS_DAMAGE = 40
 STRESS_KILL = 50
 STRESS_DECAY_NO_SHOOT = 10
 STRESS_DECAY_NO_DAMAGE = 10
-HP_SURVIVAL_LOW = 78
-HP_SURVIVAL_CRITICAL = 77
 
 combat_estado_atual = None
 ultimo_combate = 0.0
@@ -142,15 +140,15 @@ def _reset_stress_meter():
 def _halt_combat_music_on_death():
     global combat_estado_atual, estado_atual, last_combat_state_exit
     _reset_stress_meter()
-    if not combat_estado_atual:
-        return
     if combat_estado_atual in COMBAT_EVENTS:
         last_combat_state_exit[combat_estado_atual] = time.monotonic()
         _log_combat_deactivation(combat_estado_atual, "jogador morto — estresse zerado")
     combat_estado_atual = None
-    if estado_atual in COMBAT_EVENTS:
+    # A musica de action pertence ao jogador vivo: nao deve continuar
+    # durante a camera de morte, mesmo com combate dinamico desligado.
+    if estado_atual in COMBAT_EVENTS or estado_atual == "action":
         estado_atual = None
-        parar_musica()
+        parar_musica(immediate=True)
 
 
 def _map_name_loaded(map_data):
@@ -341,6 +339,16 @@ def _is_event_allowed_in_deathmatch_mode(event, config, game_mode=None):
     return canonical_event in allowed_events
 
 
+def _get_track_fade(config):
+    """Retorna o fade usado somente em transicoes de musica principal."""
+    if not config.get("fade", True):
+        return 0
+    try:
+        return max(0, float(config.get("fade_time", 1)))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _play_state(event, config, game_mode=None):
     global bomb_music_locked, estado_atual
     canonical_event = _get_canonical_event(event)
@@ -366,7 +374,7 @@ def _play_state(event, config, game_mode=None):
         should_loop = canonical_event not in ROUND_RESULT_EVENTS
         if canonical_event == "menu":
             should_loop = not bool(config.get("menu_next_on_finish", False))
-        tocar_musica(music, vol, loop=should_loop)
+        tocar_musica(music, vol, loop=should_loop, fade_time=_get_track_fade(config))
     if bomb_music_locked and estado_atual == "bomb":
         return
 
@@ -376,7 +384,7 @@ def _play_next_menu_music(config):
     music, vol = get_music_and_volume(config, "menu")
     if music:
         estado_atual = "menu"
-        tocar_musica(music, vol, loop=False)
+        tocar_musica(music, vol, loop=False, fade_time=_get_track_fade(config))
 
 
 def _sync_menu_music_mode(config):
@@ -391,13 +399,13 @@ def _sync_menu_music_mode(config):
     if next_on_finish:
         if current_loop:
             volume = get_volume_for_music(config, "menu", current_music)
-            tocar_musica(current_music, volume, loop=False)
+            tocar_musica(current_music, volume, loop=False, fade_time=_get_track_fade(config))
             return
         if not is_music_playing():
             _play_next_menu_music(config)
     elif not current_loop:
         volume = get_volume_for_music(config, "menu", current_music)
-        tocar_musica(current_music, volume, loop=True)
+        tocar_musica(current_music, volume, loop=True, fade_time=_get_track_fade(config))
 
 
 def _play_event(config, event, game_mode=None):
@@ -441,7 +449,7 @@ def _play_action_music(config, game_mode=None):
 
     loop = get_action_loop_for_music(config, music)
     duration = None if loop else get_action_duration_for_music(config, music)
-    fade = config.get("fade_time", 1) if config.get("fade", True) else 0
+    fade = _get_track_fade(config)
 
     estado_atual = "action"
     action_played_this_round = True
@@ -533,7 +541,21 @@ def _track_kill_for_combat(kills, kills_anteriores_val, now):
     return False
 
 
-def _update_stress(now, damage_taken, kill_scored):
+def _get_stress_settings(config):
+    """Retorna os valores configurados para o medidor de estresse."""
+    values = (config or {}).get("stress_settings", {})
+    return {
+        "stress_max": max(1.0, float(values.get("stress_max", STRESS_MAX))),
+        "stress_play_threshold": max(1.0, float(values.get("stress_play_threshold", STRESS_PLAY_THRESHOLD))),
+        "stress_shoot_per_sec": max(0.0, float(values.get("stress_shoot_per_sec", STRESS_SHOOT_PER_SEC))),
+        "stress_damage": max(0.0, float(values.get("stress_damage", STRESS_DAMAGE))),
+        "stress_kill": max(0.0, float(values.get("stress_kill", STRESS_KILL))),
+        "stress_decay_no_shoot": max(0.0, float(values.get("stress_decay_no_shoot", STRESS_DECAY_NO_SHOOT))),
+        "stress_decay_no_damage": max(0.0, float(values.get("stress_decay_no_damage", STRESS_DECAY_NO_DAMAGE))),
+    }
+
+
+def _update_stress(now, damage_taken, kill_scored, settings):
     global stress_level, last_stress_update, stress_decay_enabled
     global last_shot_time, last_damage_time
 
@@ -547,36 +569,26 @@ def _update_stress(now, damage_taken, kill_scored):
 
     is_shooting = last_shot_time > 0 and (now - last_shot_time) <= SHOOTING_GAP_TOLERANCE
     if dt > 0 and is_shooting:
-        stress_level = min(STRESS_MAX, stress_level + STRESS_SHOOT_PER_SEC * dt)
+        stress_level = min(settings["stress_max"], stress_level + settings["stress_shoot_per_sec"] * dt)
     if damage_taken:
-        stress_level = min(STRESS_MAX, stress_level + STRESS_DAMAGE)
+        stress_level = min(settings["stress_max"], stress_level + settings["stress_damage"])
     if kill_scored:
-        stress_level = min(STRESS_MAX, stress_level + STRESS_KILL)
+        stress_level = min(settings["stress_max"], stress_level + settings["stress_kill"])
 
-    if stress_level >= STRESS_PLAY_THRESHOLD:
+    if stress_level >= settings["stress_play_threshold"]:
         stress_decay_enabled = True
 
     if was_decay_enabled and dt > 0:
         if last_shot_time <= 0 or (now - last_shot_time) > SHOOTING_GAP_TOLERANCE:
-            stress_level = max(0.0, stress_level - STRESS_DECAY_NO_SHOOT * dt)
+            stress_level = max(0.0, stress_level - settings["stress_decay_no_shoot"] * dt)
         if last_damage_time <= 0 or (now - last_damage_time) > SHOOTING_GAP_TOLERANCE:
-            stress_level = max(0.0, stress_level - STRESS_DECAY_NO_DAMAGE * dt)
+            stress_level = max(0.0, stress_level - settings["stress_decay_no_damage"] * dt)
 
-    stress_level = min(STRESS_MAX, max(0.0, stress_level))
+    stress_level = min(settings["stress_max"], max(0.0, stress_level))
 
     if stress_decay_enabled and stress_level <= 0:
         stress_level = 0.0
         stress_decay_enabled = False
-
-
-def _survival_state_for_hp(hp):
-    if hp is None or hp <= 0:
-        return None
-    if hp < HP_SURVIVAL_CRITICAL:
-        return "survival_critical"
-    if hp < HP_SURVIVAL_LOW:
-        return "survival_low"
-    return None
 
 
 def _log_combat_activation(state, reasons, gsi_context):
@@ -613,7 +625,7 @@ def _play_combat_music(state, config, reasons, gsi_context, loop=True, duration=
     if fade_time is not None:
         fade = fade_time
     else:
-        fade = config.get("fade_time", 1) if config.get("fade", True) else 0
+        fade = _get_track_fade(config)
 
     if combat_estado_atual and combat_estado_atual in COMBAT_EVENTS:
         last_combat_state_exit[combat_estado_atual] = time.monotonic()
@@ -643,17 +655,10 @@ def _stop_combat_music(reason):
         parar_musica()
 
 
-def _transition_combat_to_survival(config, hp, now, gsi_context, game_mode=None):
-    survival_tier = _survival_state_for_hp(hp)
-    if not survival_tier or not hp or hp <= 0:
-        _stop_combat_music("combate encerrado sem condicoes de sobrevivencia")
-        return
-
-    hp_label = "critico" if survival_tier == "survival_critical" else "baixo"
+def _transition_combat_to_survival(config, now, gsi_context, settings, game_mode=None):
     reasons = [
-        f"medidor de estresse esvaziou (0/{STRESS_MAX})",
+        f"medidor de estresse esvaziou (0/{settings['stress_max']:.0f})",
         f"transicao com fade de {COMBAT_TO_SURVIVAL_FADE}s para sobrevivencia",
-        f"HP {hp_label}: {hp}",
         "jogador continua vivo",
     ]
     music, _ = get_music_and_volume(config, "survival")
@@ -680,11 +685,12 @@ def _evaluate_combat_music(player, hp, kills, kills_anteriores_val, now, config,
     gsi_health = player_state.get("health", hp)
     match_stats = player.get("match_stats") or {}
     gsi_kills = match_stats.get("kills", kills)
+    stress_settings = _get_stress_settings(config)
 
     _, active_weapon = _track_shooting(player, now)
     damage_taken = _track_damage(hp, now)
     kill_scored = _track_kill_for_combat(kills, kills_anteriores_val, now)
-    _update_stress(now, damage_taken, kill_scored)
+    _update_stress(now, damage_taken, kill_scored, stress_settings)
 
     weapon_name = (active_weapon or {}).get("name")
     weapon_slot, _ = _get_active_weapon(player)
@@ -696,7 +702,8 @@ def _evaluate_combat_music(player, hp, kills, kills_anteriores_val, now, config,
         "arma_ativa": weapon_name or "nenhuma",
         "slot_arma_ativa": weapon_slot or "nenhum",
         "estresse": round(stress_level, 1),
-        "estresse_limite": STRESS_PLAY_THRESHOLD,
+        "estresse_maximo": stress_settings["stress_max"],
+        "threshold": stress_settings["stress_play_threshold"],
         "estresse_pode_esvaziar": stress_decay_enabled,
         "atirando": is_shooting,
         "ultimo_tiro_s_atras": round(now - last_shot_time, 1) if last_shot_time else None,
@@ -704,17 +711,17 @@ def _evaluate_combat_music(player, hp, kills, kills_anteriores_val, now, config,
     }
 
     if combat_estado_atual == "combat_intense" and stress_level <= 0:
-        _transition_combat_to_survival(config, hp, now, gsi_context, game_mode=game_mode)
+        _transition_combat_to_survival(config, now, gsi_context, stress_settings, game_mode=game_mode)
         return
 
-    if stress_level >= STRESS_PLAY_THRESHOLD and combat_estado_atual != "combat_intense":
-        reasons = [f"medidor de estresse atingiu {stress_level:.0f}/{STRESS_PLAY_THRESHOLD}"]
+    if stress_level >= stress_settings["stress_play_threshold"] and combat_estado_atual != "combat_intense":
+        reasons = [f"medidor de estresse atingiu {stress_level:.0f}/{stress_settings['stress_play_threshold']:.0f}"]
         if is_shooting:
-            reasons.append(f"atirando +{STRESS_SHOOT_PER_SEC}/s estresse")
+            reasons.append(f"atirando +{stress_settings['stress_shoot_per_sec']}/s estresse")
         if damage_taken:
-            reasons.append(f"dano recebido +{STRESS_DAMAGE} estresse")
+            reasons.append(f"dano recebido +{stress_settings['stress_damage']} estresse")
         if kill_scored:
-            reasons.append(f"kill +{STRESS_KILL} estresse")
+            reasons.append(f"kill +{stress_settings['stress_kill']} estresse")
         _play_combat_music(
             "combat_intense",
             config,
@@ -1039,7 +1046,7 @@ def detectar(data):
             musica = get_music_and_volume(get_config(), "bomb_planted")
     
             if musica[0]:
-                tocar_musica(musica[0], musica[1], loop=True)
+                tocar_musica(musica[0], musica[1], loop=True, fade_time=_get_track_fade(get_config()))
     
                 estado_atual = "bomb_planted"
                 bomb_music_locked = True
@@ -1100,7 +1107,7 @@ def detectar(data):
             else:
                 last_bomb_10s = True
                 estado_atual = "bomb_10s"
-                tocar_musica(musica_10s[0], musica_10s[1])
+                tocar_musica(musica_10s[0], musica_10s[1], fade_time=_get_track_fade(get_config()))
                 _mark_main_state_played("bomb_10s")
                 print(f">>> BOMBA 10S: Volume {musica_10s[1]}%")
 
