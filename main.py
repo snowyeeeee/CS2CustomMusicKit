@@ -260,6 +260,7 @@ class App:
         self.action_time_var = tk.IntVar(value=10)
         self.fade_var = tk.BooleanVar(value=True)
         self.menu_next_on_finish_var = tk.BooleanVar(value=False)
+        self.freezetime_next_on_finish_var = tk.BooleanVar(value=False)
         self.action_loop_var = tk.BooleanVar(value=True)
 
         # Toggle para ativar/desativar combate e sobrevivência
@@ -286,6 +287,7 @@ class App:
             self.action_time_var,
             self.fade_var,
             self.menu_next_on_finish_var,
+            self.freezetime_next_on_finish_var,
             self.action_loop_var,
             self.combat_music_enabled_var,
             self.stress_max_var,
@@ -367,6 +369,11 @@ class App:
             options,
             text="Switch menu music when it ends",
             variable=self.menu_next_on_finish_var,
+        ).pack(side="left", padx=(24, 0))
+        tk.Checkbutton(
+            options,
+            text="Switch freezetime music when it ends",
+            variable=self.freezetime_next_on_finish_var,
         ).pack(side="left", padx=(24, 0))
 
         tk.Label(options, text="Fade (s):").pack(side="left", padx=(24, 4))
@@ -825,6 +832,7 @@ class App:
         self.fade_time_var.set(config.get("fade_time", 1))
         self.fade_var.set(config.get("fade", True))
         self.menu_next_on_finish_var.set(config.get("menu_next_on_finish", False))
+        self.freezetime_next_on_finish_var.set(config.get("freezetime_next_on_finish", False))
         self.action_loop_var.set(config.get("action_loop", True))
         self.action_time_var.set(config.get("action_time", 10))
 
@@ -977,6 +985,7 @@ class App:
             },
             "action_loop": self.action_loop_var.get(),
             "menu_next_on_finish": self.menu_next_on_finish_var.get(),
+            "freezetime_next_on_finish": self.freezetime_next_on_finish_var.get(),
             "fade": self.fade_var.get(),
             "action_time": self.action_time_var.get(),
             "fade_time": self.fade_time_var.get(),

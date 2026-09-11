@@ -30,6 +30,7 @@ def default_config():
         "fade": True,
         "fade_time": 1,
         "menu_next_on_finish": False,
+        "freezetime_next_on_finish": False,
         "action_loop": True,
         "action_time": 10,
         "combat_music_enabled": True,

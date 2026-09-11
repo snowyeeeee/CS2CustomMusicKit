@@ -20,6 +20,7 @@ sound_cache_lock = threading.Lock()
 path_cache = {}
 path_cache_lock = threading.Lock()
 audio_queue = queue.Queue(maxsize=32)
+effect_queue = queue.Queue(maxsize=32)
 audio_shutdown_event = threading.Event()
 
 current_music_path = None
@@ -33,10 +34,23 @@ music_state_lock = threading.Lock()
 last_effect_times = {}
 EFFECT_COOLDOWN = 0.20
 audio_worker_thread = None
+effect_worker_thread = None
 
 
 def _queue_audio_command(command, payload, priority=False):
     if audio_shutdown_event.is_set():
+        return
+    if command in {"effect", "set_effect_volume", "stop_effect", "stop_effects"}:
+        try:
+            effect_queue.put_nowait((command, payload))
+        except queue.Full:
+            if command == "effect":
+                try:
+                    effect_queue.get_nowait()
+                    effect_queue.task_done()
+                    effect_queue.put_nowait((command, payload))
+                except queue.Empty:
+                    pass
         return
     try:
         audio_queue.put_nowait((command, payload))
@@ -215,37 +229,6 @@ def _audio_worker():
                 with music_state_lock:
                     current_music_volume = volume
 
-            elif command == "effect":
-                path = payload["path"]
-                volume = payload.get("volume", 100)
-                now = time.monotonic()
-
-                if now - last_effect_times.get(path, 0.0) < EFFECT_COOLDOWN:
-                    continue
-                last_effect_times[path] = now
-
-                try:
-                    with sound_cache_lock:
-                        if path not in sound_cache:
-                            sound_cache[path] = pygame.mixer.Sound(path)
-                        sound = sound_cache[path]
-
-                    sound.set_volume(normalize_volume(volume))
-                    _play_effect_on_reserved_channel(sound, path, volume)
-                except Exception:
-                    pass
-
-            elif command == "set_effect_volume":
-                path = payload.get("path")
-                volume = payload.get("volume", 100)
-                if path:
-                    _set_active_effect_volume(path, volume)
-
-            elif command == "stop_effect":
-                path = payload.get("path")
-                if path:
-                    _stop_active_effect(path)
-
             elif command == "stop_music":
                 with music_state_lock:
                     current_music_session_id += 1
@@ -259,15 +242,51 @@ def _audio_worker():
                 else:
                     pygame.mixer.music.stop()
 
-            elif command == "stop_effects":
-                for channel in effect_channels:
-                    channel.stop()
-                active_effect_paths.clear()
-
         except Exception as e:
             print("erro audio:", e)
         finally:
             audio_queue.task_done()
+
+
+def _effect_worker():
+    while not audio_shutdown_event.is_set():
+        try:
+            command, payload = effect_queue.get(timeout=3.0)
+        except queue.Empty:
+            continue
+
+        try:
+            if command == "shutdown":
+                return
+            if command == "effect":
+                path = payload["path"]
+                volume = payload.get("volume", 100)
+                now = time.monotonic()
+                if now - last_effect_times.get(path, 0.0) < EFFECT_COOLDOWN:
+                    continue
+                last_effect_times[path] = now
+                with sound_cache_lock:
+                    if path not in sound_cache:
+                        sound_cache[path] = pygame.mixer.Sound(path)
+                    sound = sound_cache[path]
+                sound.set_volume(normalize_volume(volume))
+                _play_effect_on_reserved_channel(sound, path, volume)
+            elif command == "set_effect_volume":
+                path = payload.get("path")
+                if path:
+                    _set_active_effect_volume(path, payload.get("volume", 100))
+            elif command == "stop_effect":
+                path = payload.get("path")
+                if path:
+                    _stop_active_effect(path)
+            elif command == "stop_effects":
+                for channel in effect_channels:
+                    channel.stop()
+                active_effect_paths.clear()
+        except Exception as e:
+            print("erro efeito:", e)
+        finally:
+            effect_queue.task_done()
 
 
 def _stop_music_after_duration(duration, session_id):
@@ -403,8 +422,15 @@ def shutdown_audio():
     except Exception:
         audio_shutdown_event.set()
 
+    try:
+        effect_queue.put_nowait(("shutdown", {}))
+    except Exception:
+        pass
+
     if audio_worker_thread is not None:
         audio_worker_thread.join(timeout=1.5)
+    if effect_worker_thread is not None:
+        effect_worker_thread.join(timeout=1.5)
 
     try:
         pygame.mixer.quit()
@@ -418,4 +444,6 @@ def shutdown_audio():
 
 
 audio_worker_thread = threading.Thread(target=_audio_worker, daemon=True)
+effect_worker_thread = threading.Thread(target=_effect_worker, daemon=True)
 audio_worker_thread.start()
+effect_worker_thread.start()

@@ -374,6 +374,8 @@ def _play_state(event, config, game_mode=None):
         should_loop = canonical_event not in ROUND_RESULT_EVENTS
         if canonical_event == "menu":
             should_loop = not bool(config.get("menu_next_on_finish", False))
+        elif canonical_event == "freezetime":
+            should_loop = not bool(config.get("freezetime_next_on_finish", False))
         tocar_musica(music, vol, loop=should_loop, fade_time=_get_track_fade(config))
     if bomb_music_locked and estado_atual == "bomb":
         return
@@ -405,6 +407,36 @@ def _sync_menu_music_mode(config):
             _play_next_menu_music(config)
     elif not current_loop:
         volume = get_volume_for_music(config, "menu", current_music)
+        tocar_musica(current_music, volume, loop=True, fade_time=_get_track_fade(config))
+
+
+def _play_next_freezetime_music(config):
+    global estado_atual
+    music, vol = get_music_and_volume(config, "freezetime")
+    if music:
+        estado_atual = "freezetime"
+        tocar_musica(music, vol, loop=False, fade_time=_get_track_fade(config))
+
+
+def _sync_freezetime_music_mode(config, phase):
+    if phase != "freezetime" or estado_atual != "freezetime":
+        return
+
+    status = get_music_status()
+    current_music = status.get("path")
+    if not current_music or status.get("pending"):
+        return
+
+    next_on_finish = bool(config.get("freezetime_next_on_finish", False))
+    current_loop = bool(status.get("loop"))
+    if next_on_finish:
+        if current_loop:
+            volume = get_volume_for_music(config, "freezetime", current_music)
+            tocar_musica(current_music, volume, loop=False, fade_time=_get_track_fade(config))
+        elif not is_music_playing():
+            _play_next_freezetime_music(config)
+    elif not current_loop:
+        volume = get_volume_for_music(config, "freezetime", current_music)
         tocar_musica(current_music, volume, loop=True, fade_time=_get_track_fade(config))
 
 
@@ -948,6 +980,7 @@ def detectar(data):
         bomb_countdown_bucket,
     )
     if snapshot == last_snapshot:
+        _sync_freezetime_music_mode(get_config(), phase)
         return
     last_snapshot = snapshot
 
@@ -971,7 +1004,9 @@ def detectar(data):
                 _reset_combat_state()
                 if _bomb_audio_active(bomb_state):
                     _finish_bomb_music(play_end_round=False)
-                is_new_round = last_phase in (None, "over")
+                # O GSI pode pular "over" entre rodadas. Um novo freezetime
+                # sempre libera a musica de action da rodada anterior.
+                is_new_round = last_phase != "freezetime"
                 if is_new_round:
                     last_round_id += 1
                     action_played_this_round = False
@@ -1016,6 +1051,8 @@ def detectar(data):
                     _play_state(round_result_event, get_config())
 
             last_phase = phase
+
+    _sync_freezetime_music_mode(get_config(), phase)
 
     if not dm_mode and bomb_state == "planted" and phase not in ("over", "freezetime"):
         _stop_event_effects(get_config(), "round_10s")
